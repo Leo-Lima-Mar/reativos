@@ -70,9 +70,9 @@ void loop() {
   } 
   
   long deltaTBtns = ultimoMomentoPressionado2 - ultimoMomentoPressionado3;
-  deltaTBtns = (deltaTBtns > 0) ? deltaTBtns : -1 * result; 
+  deltaTBtns = (deltaTBtns > 0) ? deltaTBtns : -1 * deltaTBtns; 
 
-  if (result < 500) {
+  if (deltaTBtns < 500) {
     while(1);
   }
   
