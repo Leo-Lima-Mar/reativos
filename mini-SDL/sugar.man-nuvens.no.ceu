@@ -1,0 +1,202 @@
+#include "c.ceu"
+#include "sdl/sdl.ceu"
+
+#define LARGURA_JANELA 640
+#define ALTURA_JANELA 480
+
+#define BRANCO 0xFF,0xFF,0xFF,0xFF
+#define PRETO 0x00,0x00,0x00,0xFF
+#define CINZA 0xDD,0xDD,0xDD,0xFF
+#define AZUL 0x00,0x00,0xFF,0xFF
+
+code/tight VerificarColisao(var& SDL_Rect r2, var& SDL_Rect r1) -> bool do
+    escape r2.x < r1.x + r1.w and
+			r2.y < r1.y + r1.h and
+			r1.x < r2.x + r2.w and
+			r1.y < r2.y + r2.h;
+end
+
+var&? SDL_Init sdl =
+    spawn SDL_Init("Sugar man", LARGURA_JANELA, ALTURA_JANELA, SDL_Color(BRANCO));
+
+watching sdl do
+
+	code/await Raindrop (var SDL_Rect r_) -> (var& SDL_Rect r, event void collided) -> void do
+		r = &r_;
+		var float y = r.y;
+		var int vy = 200;
+
+		par/or do
+			await collided;
+		with
+            var int dt;
+            every dt in SDL_DT do
+                y = y + vy*dt/1000;
+				
+                if y > 480 then
+                    break;
+                end
+
+            end
+        with
+            every SDL_REDRAW do
+                _SDL_SetRenderDrawColor(&&outer.sdl!.ren, AZUL);
+                r.y = y as int;
+                _SDL_RenderFillRect(&&outer.sdl!.ren, (&&r as _SDL_Rect&&));
+            end
+        end
+	end
+
+	pool[9] Raindrop raindrops;
+
+    code/await Cloud (var SDL_Rect r, var float vx) -> FOREVER do
+        var float x = -r.w;
+    	
+        par do
+            var int dt;
+            every dt in SDL_DT do
+                x = x + vx*dt/1000;
+                if x > 640 then
+                    x = -r.w;
+                end
+
+				var int xInicialGota = (x + r.w/2) as int;
+				
+				if (_rand()%20 == 0) then
+					spawn Raindrop(SDL_Rect(xInicialGota, r.y, 10, 10)) in outer.raindrops;
+				end
+
+            end
+        with
+            every SDL_REDRAW do
+                _SDL_SetRenderDrawColor(&&outer.sdl!.ren, CINZA);
+                r.x = x as int;
+                _SDL_RenderFillRect(&&outer.sdl!.ren, (&&r as _SDL_Rect&&));
+            end
+        end
+    end
+
+    code/await Player (var SDL_Rect r_) -> (var& SDL_Rect r, event void collided, event void died, event void reset) -> void do
+		r = &r_;        
+		var float x = r.x;
+        var float y = r.y;
+        var float vx = 0;
+
+        x = LARGURA_JANELA/2 - 20/2;
+   		y = ALTURA_JANELA-50;
+
+	    par/or do	
+	        loop do
+				await reset;
+				r.x = LARGURA_JANELA/2 - 20/2;
+				x = LARGURA_JANELA/2 - 20/2;
+				r.y = ALTURA_JANELA - 50;
+				r.w = 20;
+				r.h = 50;
+			end
+		with	
+	        loop do
+				await collided;
+				r.y = r.y + 10;
+				r.h = r.h - 10;
+
+				if (r.h == 0) then
+					emit died;
+				end				
+			end
+		with
+	        var int dt;
+	        every dt in SDL_DT do
+			
+				if ((x <= 0 and vx==-100) or (x >= 640-20 and vx==100)) then
+            		vx = 0;
+				end
+				x = x + vx*dt/1000;
+	        end
+	    with
+	        par do
+	            loop do
+	                var _SDL_KeyboardEvent&& key;
+	                key = await SDL_KEYDOWN until key:keysym.sym==_SDLK_LEFT;
+	                vx = -100;
+	                key = await SDL_KEYUP   until key:keysym.sym==_SDLK_LEFT;
+			        vx = 0;
+	            end
+	        with
+	            loop do
+	                var _SDL_KeyboardEvent&& key;
+	                key = await SDL_KEYDOWN until key:keysym.sym==_SDLK_RIGHT;
+	                vx = 100;
+	                key = await SDL_KEYUP   until key:keysym.sym==_SDLK_RIGHT;
+	                vx = 0;
+	            end
+	        end
+	    with
+	        every SDL_REDRAW do
+	            _SDL_SetRenderDrawColor(&&outer.sdl!.ren, PRETO);
+	            r.x = x as int;
+	            _SDL_RenderFillRect(&&outer.sdl!.ren, (&&r as _SDL_Rect&&));
+	        end
+	    end
+
+    end
+
+    native/pre do
+        ##include <time.h>
+    end
+    _srand(_time(null));
+
+    pool[3] Cloud clouds;
+
+    var int i;
+    loop i in [1 -> 3] do
+        var int w = 50 + _rand()%200;
+        var int h = 20 + _rand()%50;
+        var int y = h + _rand()%200;
+        spawn Cloud(SDL_Rect(0,y,w,h), 10+_rand()%50) in clouds;
+    end
+
+
+	var&? Player player = spawn Player(SDL_Rect(LARGURA_JANELA/2 - 20/2, ALTURA_JANELA - 50, 20, 50));
+	var&? Raindrop r; 
+
+	loop do
+		par/or do
+			var int dt;
+		    every dt in SDL_DT do
+				loop r in raindrops do
+					var bool colidiu = call VerificarColisao(&r!.r, &player!.r);
+
+					if (colidiu) then			
+						emit player!.collided;
+						emit r!.collided;
+					end
+				end
+			end
+		with
+			await player!.died;
+		end
+
+		par/or do
+			var& SDL_Open_Font font = spawn SDL_Open_Font("samples/Deutsch.ttf", 40);
+
+			var& SDL_New_Text txt =
+				spawn SDL_New_Text(&sdl!.ren, &font.font, "Pressione Enter para continuar", SDL_Color(PRETO));
+			var SDL_Rect txt_rct = val SDL_Rect((LARGURA_JANELA - txt.tex.width)/2, 200, txt.tex.width, txt.tex.height);
+			
+			every SDL_REDRAW do
+			    _SDL_RenderCopy(&&sdl!.ren, &&txt.tex.tex, null, &&txt_rct as _SDL_Rect&&);
+			end
+		with
+			//espera enter
+			var _SDL_KeyboardEvent&& key;
+			key = await SDL_KEYDOWN until key:keysym.sym==_SDLK_RETURN;
+		end
+
+		emit player!.reset;
+	end
+
+    await FOREVER;
+end
+
+escape 0;
